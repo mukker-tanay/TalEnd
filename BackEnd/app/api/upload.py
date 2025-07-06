@@ -1,4 +1,4 @@
-from fastapi import APIRouter, File, UploadFile, HTTPException, Depends
+from fastapi import APIRouter, File, UploadFile, HTTPException, Depends, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import FileResponse
 from uuid import uuid4
@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 from bson import ObjectId
 from typing import Optional
+import json
 
 from app.utils.auth import decode_token
 from app.utils.parser import (
@@ -25,6 +26,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 @router.post("/upload-cv")
 async def upload_cv(
     file: UploadFile = File(...),
+    tags: str = Form(None),
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     token = credentials.credentials
@@ -77,6 +79,16 @@ async def upload_cv(
 
         parsed_data = parse_cv_enhanced(extracted_text, file_name=original_name)
 
+        # Parse tags from JSON string if provided
+        tags_list = []
+        if tags:
+            try:
+                tags_list = json.loads(tags)
+                if not isinstance(tags_list, list):
+                    tags_list = []
+            except Exception:
+                tags_list = []
+
         # Prepare DB entry
         db_entry = parsed_data.copy()
         db_entry.update({
@@ -87,7 +99,8 @@ async def upload_cv(
             "file_type": ext,
             "upload_time": datetime.utcnow(),
             "processing_status": "completed",
-            "text_length": len(extracted_text)
+            "text_length": len(extracted_text),
+            "tags": tags_list
         })
 
         result = db.cvs.insert_one(db_entry)
@@ -147,6 +160,8 @@ def list_user_cvs(credentials: HTTPAuthorizationCredentials = Depends(security))
             "stored_filename": cv.get("stored_filename"),
             "uploaded_at": cv.get("upload_time").isoformat(),
             "status": cv.get("processing_status", "unknown"),
+            "name": cv.get("name"),
+            "tags": cv.get("tags", [])
         })
 
     return result
